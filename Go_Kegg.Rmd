@@ -1,0 +1,336 @@
+---
+title: "GO and KEGG analysis "
+output: html_document
+date: "2024-04-08"
+---
+
+```{r}
+library(BiocManager)
+library(limma)
+library(GEOquery)
+library(pheatmap)
+library(ggplot2)
+```
+
+```{r}
+gset=getGEO("GSE62232", GSEMatrix = T, getGPL = F )
+class(gset)
+gset=gset[[1]]
+gset
+class(gset)
+dim(gset)
+View(gset)
+```
+
+```{r}
+#Use this function to extract the expression matrix of your counts
+ex=exprs(gset)
+class(ex)
+```
+
+```{r}
+max(ex)
+min(ex) 
+```
+
+```{r}
+log_ex = log2(ex + 1)  # Adding 1 to avoid log(0)
+
+# Checking the transformed data
+print(max(log_ex))
+print(min(log_ex))
+```
+
+```{r}
+boxplot(log_ex)
+```
+
+```{r}
+gset$title
+cl = c(rep("Normal", 10), rep("Tumor", 81))
+cl
+```
+
+```{r}
+pheatmap(cor(ex))
+pheatmap(cor(ex), labels_col = cl, labels_row = cl)
+```
+
+```{r}
+# create & fit limma linear model
+gset$class=cl
+designMatrix=model.matrix(~ class+0, gset)
+fit= lmFit(gset, designMatrix)
+fit2=contrasts.fit(fit, makeContrasts(classNormal-classTumor, levels = designMatrix))
+fit2=eBayes(fit2, 0.01)
+```
+
+```{r}
+#No our Gene expressions are created 
+GE <- topTable(fit2, number = nrow(ex), sort.by = "logFC", adjust.method = "BH", p.value = 0.05)
+dim(GE)
+```
+
+```{r}
+#Get up and downregulated genes 
+UP = GE[which(GE$logFC > 1), ]
+dim(UP)
+Down = GE[which(GE$logFC < -1), ]
+dim(Down)
+```
+
+
+```{r}
+#Download the data directly from GEO for other dataset
+gset2=getGEO("GSE121248", GSEMatrix = T, getGPL = F )
+class(gset2)
+gset2=gset2[[1]]
+gset2
+class(gset2)
+dim(gset2)
+View(gset2)
+```
+
+```{r}
+#Use this function to extract the expression matrix of your counts
+ex2=exprs(gset2)
+class(ex2)
+```
+
+```{r}
+max(ex2)
+min(ex2) 
+```
+
+```{r}
+boxplot(ex2)
+```
+
+
+```{r}
+#Define classes of the data
+gset2$title
+cl2 = c(rep("Tumor", 70), rep("Normal", 37))
+cl2
+```
+
+```{r}
+#You can create a heat map to make sure if there is a correlation within your data
+pheatmap(cor(ex2))
+pheatmap(cor(ex2), labels_col = cl2, labels_row = cl2)
+```
+
+
+```{r}
+# create & fit limma linear model
+gset2$class=cl2
+designMatrix2=model.matrix(~ class+0, gset2)
+fit2= lmFit(gset2, designMatrix2)
+fit2_2=contrasts.fit(fit2, makeContrasts(classNormal-classTumor, levels = designMatrix2))
+fit2_2=eBayes(fit2_2, 0.01)
+```
+
+
+```{r}
+#No our Gene expressions are created 
+GE2 <- topTable(fit2_2, number = nrow(ex2), sort.by = "logFC", adjust.method = "BH", p.value = 0.05)
+dim(GE2)
+```
+
+
+```{r}
+#Get up and downregulated genes
+UP_2=GE2[which(GE2$logFC>1), ]
+dim(UP_2)
+Down_2=GE2[which(GE2$logFC < -1), ]
+dim(Down_2)
+```
+
+```{r}
+#add a new column named "Gene.symbol" to each of the data frames
+if (!requireNamespace("tibble", quietly = TRUE)) {
+    install.packages("tibble")
+}
+library(tibble)
+UP <- tibble::rownames_to_column(UP, "Gene.symbol")
+UP_2 <- tibble::rownames_to_column(UP_2, "Gene.symbol")
+Down <- tibble::rownames_to_column(Down, "Gene.symbol")
+Down_2 <- tibble::rownames_to_column(Down_2, "Gene.symbol")
+```
+
+```{r}
+# Combine UP and DOWN DEGs from both datasets
+combined_up = merge(UP, UP_2, by = "Gene.symbol")
+combined_down = merge(Down, Down_2, by = "Gene.symbol")
+```
+
+```{r}
+# Identify Common and Unique DEGs
+common_up = intersect(UP$Gene.symbol, UP_2$Gene.symbol)
+common_down = intersect(Down$Gene.symbol, Down_2$Gene.symbol)
+unique_up = setdiff(UP$Gene.symbol, UP_2$Gene.symbol)
+unique_down = setdiff(Down$Gene.symbol, Down_2$Gene.symbol)
+```
+
+```{r}
+library(VennDiagram)
+```
+
+```{r}
+DEG_ids_GE <- rownames(GE)
+DEG_ids_GE2 <- rownames(GE2)
+gene_lists <- list(GSE55092_DEGs = DEG_ids_GE, GSE121248_DEGs = DEG_ids_GE2)
+
+# Draw a Venn diagram
+venn_plot <- venn.diagram(
+  x = gene_lists,
+  category.names = c("GSE55092 DEGs", "GSE121248 DEGs"),
+  filename = "~/Desktop/VennDiagram_DEGs.png",
+  output = TRUE,
+  height = 480,
+  width = 480,
+  resolution = 300
+)
+
+# Show the Venn diagram in R
+grid.draw(venn_plot)
+```
+
+```{r}
+#combine the up regualted genes from both the datasets
+all_DEGs_dataset1 <- union(UP$Gene.symbol, Down$Gene.symbol)
+all_DEGs_dataset2 <- union(UP_2$Gene.symbol, Down_2$Gene.symbol)
+```
+
+```{r}
+df_all_DEGs_dataset1 <- data.frame(Gene.symbol = all_DEGs_dataset1)
+df_all_DEGs_dataset2 <- data.frame(Gene.symbol = all_DEGs_dataset2)
+
+# Write to CSV files
+#write.csv(df_all_DEGs_dataset1, "//Users/swethayadavalli/Desktop/all_DEGs_dataset1.csv", row.names = FALSE, quote = FALSE)
+#write.csv(df_all_DEGs_dataset2, "//Users/swethayadavalli/Desktop/all_DEGs_dataset2.csv", row.names = FALSE, quote = FALSE)
+```
+
+```{r}
+probe_ids <- df_all_DEGs_dataset1[, 1]
+probe_ids_2 <- df_all_DEGs_dataset2[, 1]
+```
+
+```{r}
+library(hgu133plus2.db)
+mapped_genes <- mapIds(hgu133plus2.db, keys = probe_ids, column = "SYMBOL", keytype = "PROBEID", multiVals = "list")
+```
+
+```{r}
+mapped_genes_2 <- mapIds(hgu133plus2.db, keys = probe_ids_2, column = "SYMBOL", keytype = "PROBEID", multiVals = "list")
+```
+```{r}
+head(mapped_genes)
+```
+
+```{r}
+#GO enrichment analysis for 1st dataset 
+library(clusterProfiler)
+
+# Assuming your gene list is a vector of gene symbols
+gene_list <- as.vector(mapped_genes) # Replace with common_down, unique_up, or unique_down as needed
+
+# Perform GO enrichment analysis
+ego <- enrichGO(gene = gene_list, 
+                OrgDb = org.Hs.eg.db, # Choose the appropriate OrgDb for your organism
+                keyType = "SYMBOL",
+                ont = "BP", # Biological Processes
+                pAdjustMethod = "BH", # Benjamini-Hochberg correction
+                qvalueCutoff = 0.05)
+
+# View the results
+head(ego)
+
+# Plot the results
+barplot(ego, showCategory=20) 
+```
+```{r}
+#GO enrichment analysis for the 2nd dataset
+# Assuming your gene list is a vector of gene symbols
+gene_list <- as.vector(mapped_genes_2) # Replace with common_down, unique_up, or unique_down as needed
+# Perform GO enrichment analysis
+ego <- enrichGO(gene = gene_list, 
+                OrgDb = org.Hs.eg.db, # Choose the appropriate OrgDb for your organism
+                keyType = "SYMBOL",
+                ont = "BP", # Biological Processes
+                pAdjustMethod = "BH", # Benjamini-Hochberg correction
+                qvalueCutoff = 0.05)
+# View the results
+head(ego)
+# Plot the results
+barplot(ego, showCategory=20) 
+```
+
+```{r}
+mapped_entrez_ids <- mapIds(hgu133plus2.db,
+                            keys = probe_ids,
+                            column = "ENTREZID",
+                            keytype = "PROBEID",
+                            multiVals = "first")
+# Checking the mapped Entrez IDs
+head(mapped_entrez_ids)
+```
+
+
+```{r}
+mapped_entrez_ids_2 <- mapIds(hgu133plus2.db,
+                            keys = probe_ids_2,
+                            column = "ENTREZID",
+                            keytype = "PROBEID",
+                            multiVals = "first")
+# Checking the mapped Entrez IDs
+head(mapped_entrez_ids_2)
+```
+
+```{r}
+#KEGG pathway analysis for 1st dataset
+ego2 <- enrichKEGG(gene = mapped_entrez_ids, 
+                   organism = 'hsa', # for human
+                   pAdjustMethod = "BH", 
+                   qvalueCutoff = 0.05)
+head(ego2)
+barplot(ego2, showCategory = 20)
+```
+```{r}
+#KEGG pathway analysis for 2nd dataset
+ego2_2 <- enrichKEGG(gene = mapped_entrez_ids_2, 
+                   organism = 'hsa', # for human
+                   pAdjustMethod = "BH", 
+                   qvalueCutoff = 0.05)
+head(ego2_2)
+barplot(ego2_2, showCategory = 20)
+```
+```{r}
+# Convert enrichment results to data frames
+ego2_df <- as.data.frame(ego2)
+ego2_2_df <- as.data.frame(ego2_2)
+
+# Focus on ID and Description
+ego2_df <- ego2_df[, c("ID", "Description", "p.adjust")]
+ego2_2_df <- ego2_2_df[, c("ID", "Description", "p.adjust")]
+```
+
+```{r}
+# Finding common KEGG pathway IDs
+common_ids <- intersect(ego2_df$ID, ego2_2_df$ID)
+
+# Optionally, find common by descriptions
+common_descriptions <- intersect(ego2_df$Description, ego2_2_df$Description)
+
+# Display results
+print("Common KEGG Pathway IDs:")
+print(common_ids)
+print("Common KEGG Pathway Descriptions:")
+print(common_descriptions)
+```
+
+
+
+
+
+

@@ -1,0 +1,300 @@
+---
+title: "Motif analysis"
+output: html_document
+date: "2024-04-15"
+---
+
+```{r}
+library(BiocManager)
+library(limma)
+library(GEOquery)
+library(pheatmap)
+library(ggplot2)
+```
+
+```{r}
+gset=getGEO("GSE62232", GSEMatrix = T, getGPL = F )
+class(gset)
+gset=gset[[1]]
+gset
+class(gset)
+dim(gset)
+View(gset)
+```
+
+```{r}
+#Use this function to extract the expression matrix of your counts
+ex=exprs(gset)
+class(ex)
+```
+
+```{r}
+max(ex)
+min(ex) 
+```
+
+```{r}
+log_ex = log2(ex + 1)  # Adding 1 to avoid log(0)
+# Checking the transformed data
+print(max(log_ex))
+print(min(log_ex))
+```
+
+```{r}
+boxplot(log_ex)
+```
+
+```{r}
+gset$title
+cl = c(rep("Normal", 10), rep("Tumor", 81))
+cl
+```
+
+```{r}
+pheatmap(cor(ex))
+pheatmap(cor(ex), labels_col = cl, labels_row = cl)
+```
+
+```{r}
+# create & fit limma linear model
+gset$class=cl
+designMatrix=model.matrix(~ class+0, gset)
+fit= lmFit(gset, designMatrix)
+fit2=contrasts.fit(fit, makeContrasts(classNormal-classTumor, levels = designMatrix))
+fit2=eBayes(fit2, 0.01)
+```
+
+```{r}
+#No our Gene expressions are created 
+GE <- topTable(fit2, number = nrow(ex), sort.by = "logFC", adjust.method = "BH", p.value = 0.05)
+dim(GE)
+```
+
+```{r}
+#Get the up and downregulated genes 
+UP = GE[which(GE$logFC > 1), ]
+dim(UP)
+Down = GE[which(GE$logFC < -1), ]
+dim(Down)
+```
+
+
+```{r}
+#Download the data directly from GEO 
+gset2=getGEO("GSE121248", GSEMatrix = T, getGPL = F )
+class(gset2)
+gset2=gset2[[1]]
+gset2
+class(gset2)
+dim(gset2)
+View(gset2)
+```
+
+```{r}
+#Use this function to extract the expression matrix of your counts
+ex2=exprs(gset2)
+class(ex2)
+```
+
+```{r}
+max(ex2)
+min(ex2) 
+```
+
+```{r}
+boxplot(ex2)
+```
+
+
+```{r}
+#Define classes of the data
+gset2$title
+cl2 = c(rep("Tumor", 70), rep("Normal", 37))
+cl2
+```
+
+```{r}
+#You can create a heat map to make sure if there is a correlation within your data
+pheatmap(cor(ex2))
+pheatmap(cor(ex2), labels_col = cl2, labels_row = cl2)
+```
+
+
+```{r}
+# create & fit limma linear model
+gset2$class=cl2
+designMatrix2=model.matrix(~ class+0, gset2)
+fit2= lmFit(gset2, designMatrix2)
+fit2_2=contrasts.fit(fit2, makeContrasts(classNormal-classTumor, levels = designMatrix2))
+fit2_2=eBayes(fit2_2, 0.01)
+```
+
+
+```{r}
+#No our Gene expressions are created 
+GE2 <- topTable(fit2_2, number = nrow(ex2), adjust.method = "BH", p.value = 0.05)
+dim(GE2)
+```
+
+
+```{r}
+#Get up and down regulated genes 
+UP_2=GE2[GE2$logFC>1, ]
+dim(UP_2)
+Down_2=GE2[GE2$logFC < -1, ]
+dim(Down_2)
+```
+
+```{r}
+if (!requireNamespace("tibble", quietly = TRUE)) {
+    install.packages("tibble")
+}
+library(tibble)
+GE <- tibble::rownames_to_column(GE, "Gene.symbol")
+GE2 <- tibble::rownames_to_column(GE2, "Gene.symbol")
+UP <- tibble::rownames_to_column(UP, "Gene.symbol")
+UP_2 <- tibble::rownames_to_column(UP_2, "Gene.symbol")
+Down <- tibble::rownames_to_column(Down, "Gene.symbol")
+Down_2 <- tibble::rownames_to_column(Down_2, "Gene.symbol")
+```
+
+```{r}
+# Combine UP and DOWN DEGs from both datasets
+combined_up = merge(UP, UP_2, by = "Gene.symbol")
+combined_down = merge(Down, Down_2, by = "Gene.symbol")
+```
+
+```{r}
+# Identify Common and Unique DEGs
+common_up = intersect(UP$Gene.symbol, UP_2$Gene.symbol)
+common_down = intersect(Down$Gene.symbol, Down_2$Gene.symbol)
+unique_up = setdiff(UP$Gene.symbol, UP_2$Gene.symbol)
+unique_down = setdiff(Down$Gene.symbol, Down_2$Gene.symbol)
+```
+
+```{r}
+common_final = intersect(GE$Gene.symbol, GE2$Gene.symbol)
+head(common_final)
+```
+
+```{r}
+library(hgu133plus2.db)
+genes <- mapIds(hgu133plus2.db, keys = common_up, column = "SYMBOL", keytype = "PROBEID", multiVals = "list")
+```
+
+```{r}
+head(genes)
+```
+
+```{r}
+genes <- lapply(genes, function(x) x[!is.na(x) & x != ""])
+# Convert the list to a data frame using stack
+genes_df <- stack(genes)
+# If there are multiple gene symbols for a probe, they're concatenated using ';'
+genes_df$values <- sapply(genes_df$values, function(x) paste(x, collapse = ";"))
+# Rename columns for clarity
+colnames(genes_df) <- c("GeneSymbol", "ProbeID")
+# Write the data frame to a CSV file
+write.csv(genes_df, file = "~/Desktop/combine_up.csv", row.names = FALSE)
+```
+
+```{r}
+library(rtracklayer)
+library(BSgenome)
+library(BSgenome.Hsapiens.UCSC.hg38)
+# Load the genome
+genome <- BSgenome.Hsapiens.UCSC.hg38
+# Define the promoter region length (upstream and downstream)
+promoter_length_upstream <- 2000
+promoter_length_downstream <- 500  # For example, 500 bp downstream
+# Read the data from CSV
+data <- read.csv('/Users/swethayadavalli/Downloads/combine_up_promoter.csv', stringsAsFactors = FALSE)
+# Ensure chromosome names are prefixed with 'chr'
+data$chrom <- ifelse(startsWith(data$chrom, "chr"), data$chrom, paste0("chr", data$chrom))
+# Function to calculate promoter regions including downstream
+calculate_promoter <- function(txStart, txEnd, strand, chrom) {
+  chrom_lengths <- seqlengths(genome)[chrom]
+  if (strand == '+') {
+    start <- pmax(txStart - promoter_length_upstream, 1)
+    end <- pmin(txStart + promoter_length_downstream, chrom_lengths)
+  } else if (strand == '-') {
+    start <- pmax(txEnd - promoter_length_downstream, 1)
+    end <- pmin(txEnd + promoter_length_upstream, chrom_lengths)
+  } else {
+    stop('Strand not recognized.')
+  }
+  return(list(start=start, end=end))
+}
+```
+
+```{r}
+promoter_info <- mapply(calculate_promoter, 
+                        data$txStart, 
+                        data$txEnd, 
+                        data$strand, 
+                        data$chrom, 
+                        SIMPLIFY = FALSE)
+```
+
+
+```{r}
+data$Promoter_Start <- sapply(promoter_info, function(x) x$start)
+data$Promoter_End <- sapply(promoter_info, function(x) x$end)
+```
+
+```{r}
+promoter_ranges <- GRanges(seqnames = data$chrom,
+                           ranges = IRanges(start = data$Promoter_Start, end = data$Promoter_End),
+                           strand = data$strand)
+```
+
+```{r}
+promoter_sequences <- getSeq(genome, promoter_ranges)
+```
+
+```{r}
+data$Promoter_Seq <- mapply(function(seq) paste(seq, collapse = ""), promoter_sequences)
+```
+
+```{r}
+head(data)
+```
+
+```{r}
+library(Biostrings)
+promoter_sequences_set <- DNAStringSet(data$Promoter_Seq)
+names(promoter_sequences_set) <- paste(data$chrom, data$Promoter_Start, data$Promoter_End, sep="_")
+```
+
+```{r}
+library(rtracklayer)
+export(promoter_sequences_set, con = "~/Desktop/promoter_sequences.fasta", format = "fasta")
+```
+
+```{r}
+write.table(data, '~/Desktop/promoter_combined.tsv', sep = '\t', row.names = FALSE, quote = FALSE)
+```
+
+```{r}
+library(Biostrings)
+# Path to your original FASTA file
+fasta_file <- "~/Desktop/promoter_sequences.fasta"
+sequences <- readDNAStringSet(fasta_file, format="fasta")
+# Get identifiers and find duplicates
+ids <- names(sequences)
+ids_df <- data.frame(identifier = ids, stringsAsFactors = FALSE)
+ids_df$duplicated <- duplicated(ids_df$identifier) | duplicated(ids_df$identifier, fromLast = TRUE)
+
+# Append a unique suffix to duplicated identifiers
+ids_df$unique_identifier <- with(ids_df, ifelse(duplicated,
+                                                paste(identifier, ave(seq_along(identifier), identifier, FUN=seq_along), sep="_"),
+                                                identifier))
+
+# Apply the new unique identifiers to the sequences
+names(sequences) <- ids_df$unique_identifier
+# Path to your new unique FASTA file
+output_fasta_file <- "~/Desktop/unique_promoter_sequences.fasta"
+writeXStringSet(sequences, filepath=output_fasta_file, format="fasta")
+```
+
+
